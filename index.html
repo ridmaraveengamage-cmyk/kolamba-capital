@@ -1579,16 +1579,18 @@ function answerPQ(key,v){
     if(keys.every(x=>PQ[x])){const s=keys.filter(x=>PQ[x].ok).length,pr=PP.quiz[a];if(!pr||s>=pr.score){PP.quiz=Object.assign({},PP.quiz,{[a]:{score:s,total:n}});savePP()}}}
   if(k==="t"&&L.test){const keys=L.test.qs.map((_,i)=>"t~"+a+"~"+i);
     if(keys.every(x=>PQ[x])){const s=keys.filter(x=>PQ[x].ok).length,pct=Math.round(s/keys.length*100),pr=PP.tests[a]||{best:0,attempts:0};
-      PP.tests=Object.assign({},PP.tests,{[a]:{best:Math.max(pr.best,pct),attempts:pr.attempts+1,passed:Math.max(pr.best,pct)>=70,last:pct}});savePP()}}
+      PP.tests=Object.assign({},PP.tests,{[a]:{best:Math.max(pr.best,pct),attempts:pr.attempts+1,passed:Math.max(pr.best,pct)>=passMark(a),last:pct}});savePP()}}
   learnRefresh();
 }
+/* final exam: w=0 draws from every teaching day, 80 questions, 80% to pass */
+function passMark(key){return /-final$/.test(key)?80:70}
 function startTest(pid,w){
-  const pool=[];
-  for(let n=(w-1)*7+1;n<=(w-1)*7+6;n++){const d=dayDoc(dayId(pid,n));if(d)(tr(d).quiz||[]).forEach((_,qi)=>pool.push([d.id,qi]))}
+  const pool=[],fin=!w,from=fin?1:(w-1)*7+1,to=fin?28:(w-1)*7+6;
+  for(let n=from;n<=to;n++){const d=dayDoc(dayId(pid,n));if(d&&d.type!=="review")(tr(d).quiz||[]).forEach((_,qi)=>pool.push([d.id,qi]))}
   for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
-  const key=pid+"-w"+w;
+  const key=fin?pid+"-final":pid+"-w"+w;
   Object.keys(PQ).filter(k=>k.indexOf("t~"+key+"~")===0).forEach(k=>delete PQ[k]);
-  L.test={key,qs:pool.slice(0,40)};
+  L.test={key,qs:pool.slice(0,fin?80:40)};
   learnRefresh();
 }
 
@@ -1632,17 +1634,18 @@ function learnPday(ctx){
   }
   const T=tr(doc);
   if(doc.type==="review"){
-    const key=pid+"-w"+di.w,tst=PP.tests[key],proj=PP.projects[key],inTest=L.test&&L.test.key===key;
+    const fin=di.n===28,key=fin?pid+"-final":pid+"-w"+di.w,tst=PP.tests[key],proj=PP.projects[key],inTest=L.test&&L.test.key===key;
+    const pm=passMark(key),tname=fin?"Final exam":"Weekly test",tw=fin?"final":di.w;
     let testHTML="";
     if(inTest){const keys=L.test.qs.map((_,i)=>"t~"+key+"~"+i),r=pqHTML(ctx,keys),pct=r.total?Math.round(r.score/r.total*100):0;
-      testHTML=`<section class="panel"><h3>Weekly test <span class="meta">${r.ans<r.total?`${r.total-r.ans} of ${r.total} to go`:`Score ${pct}% · ${pct>=70?"passed":"not yet passed (70% needed)"}`}</span></h3>${r.html}${r.ans===r.total?`<div class="qscore"><span>You scored ${r.score} of ${r.total} (${pct}%).</span><button class="btn-ghost" data-ptest="${esc(pid)}|${di.w}">Take a new test</button></div>`:""}</section>`}
-    else testHTML=`<section class="panel"><h3>Weekly test <span class="meta">${tst?`Best ${tst.best}% · ${tst.passed?"passed":"not yet passed"}`:"Not taken"}</span></h3><p class="pdesc">Up to 40 questions drawn at random from this week's daily quizzes. You need 70% to pass. Allow up to 2 hours.</p><button class="btn" data-ptest="${esc(pid)}|${di.w}">${tst?"Retake the test":"Start the test"}</button></section>`;
+      testHTML=`<section class="panel"><h3>${tname} <span class="meta">${r.ans<r.total?`${r.total-r.ans} of ${r.total} to go`:`Score ${pct}% · ${pct>=pm?"passed":`not yet passed (${pm}% needed)`}`}</span></h3>${r.html}${r.ans===r.total?`<div class="qscore"><span>You scored ${r.score} of ${r.total} (${pct}%).</span><button class="btn-ghost" data-ptest="${esc(pid)}|${tw}">${fin?"Take a new exam":"Take a new test"}</button></div>`:""}</section>`}
+    else testHTML=`<section class="panel"><h3>${tname} <span class="meta">${tst?`Best ${tst.best}% · ${tst.passed?"passed":"not yet passed"}`:"Not taken"}</span></h3><p class="pdesc">${fin?"80 questions drawn at random from the daily quizzes of all four weeks. You need 80% to pass. Allow about 90 minutes.":"Up to 40 questions drawn at random from this week's daily quizzes. You need 70% to pass. Allow up to 2 hours."}</p><button class="btn" data-ptest="${esc(pid)}|${tw}">${tst?(fin?"Retake the exam":"Retake the test"):(fin?"Start the exam":"Start the test")}</button></section>`;
     const pj=T.project||{};
     return `<article class="lesson">${head}
     <section class="objectives"><h2>This week in six points</h2><ul>${(T.summary||[]).map(s=>`<li>${esc(s)}</li>`).join("")}</ul></section>
     <section><h2 class="lh2">Today's plan</h2><table class="t"><thead><tr><th>Block</th><th>Minutes</th><th>What to do</th></tr></thead><tbody>${(T.plan||[]).map(b=>`<tr><td>${esc(b.block)}</td><td>${b.minutes}</td><td>${esc(b.what)}</td></tr>`).join("")}</tbody></table></section>
     ${testHTML}
-    <section class="panel"><h3>Weekly project <span class="meta">${proj?"Submitted "+esc(proj):"Not submitted"}</span></h3><p class="mlt" style="font-size:18px">${esc(pj.title||"")}</p><p>${esc(pj.brief||"")}</p>
+    <section class="panel"><h3>${fin?"Capstone":"Weekly project"} <span class="meta">${proj?"Submitted "+esc(proj):"Not submitted"}</span></h3><p class="mlt" style="font-size:18px">${esc(pj.title||"")}</p><p>${esc(pj.brief||"")}</p>
      <h2 class="lh2" style="margin-top:12px">Include</h2><ul class="srcs">${(pj.include||[]).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
      <h2 class="lh2" style="margin-top:12px">Marking rubric</h2><ul class="srcs">${(pj.rubric||[]).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
      <div class="lesson-actions"><button class="${proj?"btn-ghost":"btn"}" data-pproj="${esc(key)}">${proj?"Mark as not submitted":"Mark project as submitted"}</button></div></section>
@@ -1669,7 +1672,7 @@ function progClick(t,d){
   if(d.pqn){const k=d.pqn.lastIndexOf("|"),key=d.pqn.slice(0,k),i=d.pqn.slice(k+1),ctx=$("#viewMob").hidden?"w":"m",el=$("#"+ctx+"-pqi-"+i),v=el?parseFloat(el.value):NaN;
     if(!isFinite(v)){const e=$("#"+ctx+"-pqe-"+i);if(e)e.hidden=false;if(el)el.focus();return true}answerPQ(key,v);return true}
   if(d.pqretry){Object.keys(PQ).filter(k=>k.indexOf("d~"+d.pqretry+"~")===0).forEach(k=>delete PQ[k]);learnRefresh();return true}
-  if(d.ptest){const [pid,w]=d.ptest.split("|");startTest(pid,+w);return true}
+  if(d.ptest){const [pid,w]=d.ptest.split("|");startTest(pid,w==="final"?0:+w);return true}
   if(d.pproj){const v=PP.projects[d.pproj];PP.projects=Object.assign({},PP.projects,{[d.pproj]:v?null:todayISO()});if(!PP.projects[d.pproj])delete PP.projects[d.pproj];savePP();learnRefresh();return true}
   if(d.pdone){const v=!PP.done[d.pdone];PP.done=Object.assign({},PP.done,{[d.pdone]:v});if(!v)delete PP.done[d.pdone];timerStop(true);savePP();learnRefresh();return true}
   return false;
